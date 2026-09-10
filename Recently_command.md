@@ -1,3 +1,186 @@
+# PowerShell 查看 / 内存 / 磁盘 / 进程 命令速查
+
+> **⚠️ 本文所有命令均基于 Windows 系统下的 PowerShell 环境**（Windows 10/11、Windows Server 均适用）。
+> 打开方式：`Win + X` → 选「Windows PowerShell / 终端」，或 `Win + R` 输入 `powershell` 回车。
+> 注意区分：部分命令（如 `systeminfo`、`tasklist`）是 CMD 也通用的外部命令；`Get-*` 是 PowerShell 原生 Cmdlet。两者在 PowerShell 里都能用。
+
+---
+
+## 一、内存（Memory）
+
+### 1. 查看总内存与可用内存
+
+```powershell
+Get-CimInstance Win32_OperatingSystem |
+    Select-Object CSName,
+        @{n='总内存(GB)';e={[math]::Round($_.TotalVisibleMemorySize/1MB,2)}},
+        @{n='可用内存(GB)';e={[math]::Round($_.FreePhysicalMemory/1MB,2)}},
+        @{n='已用内存(GB)';e={[math]::Round(($_.TotalVisibleMemorySize-$_.FreePhysicalMemory)/1MB,2)}}
+```
+
+### 2. 查看内存使用率（百分比）
+
+```powershell
+$os = Get-CimInstance Win32_OperatingSystem
+"内存使用率: {0:N1}%" -f (100 - ($os.FreePhysicalMemory / $os.TotalVisibleMemorySize * 100))
+```
+
+### 3. 查看内存条（插槽）硬件信息
+
+```powershell
+Get-CimInstance Win32_PhysicalMemory |
+    Select-Object Manufacturer, PartNumber,
+        @{n='容量(GB)';e={$_.Capacity/1GB}}, Speed, DeviceLocator
+```
+
+### 4. 性能计数器方式（实时值）
+
+```powershell
+Get-Counter '\Memory\Available MBytes'          # 可用内存(MB)
+Get-Counter '\Memory\% Committed Bytes In Use'  # 提交内存使用率
+```
+
+> 英文/中文系统计数器路径名可能不同，报错时可改用 `Get-CimInstance` 方式。
+
+---
+
+## 二、CPU 与硬件概况
+
+```powershell
+# CPU 型号、核心数、逻辑处理器数
+Get-CimInstance Win32_Processor |
+    Select-Object Name, NumberOfCores, NumberOfLogicalProcessors, MaxClockSpeed
+
+# 当前 CPU 负载百分比
+(Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average
+
+# 一条命令看整机概况（Windows PowerShell 5.1 可用，输出较慢请耐心等待）
+Get-ComputerInfo | Select-Object CsName, WindowsProductName, OsArchitecture, CsTotalPhysicalMemory
+```
+
+传统外部命令（CMD 通用，PowerShell 下也可运行）：
+
+```cmd
+systeminfo
+```
+
+---
+
+## 三、磁盘
+
+```powershell
+# 各分区容量与剩余空间
+Get-Volume | Where-Object DriveLetter |
+    Select-Object DriveLetter, FileSystemLabel,
+        @{n='总容量(GB)';e={[math]::Round($_.Size/1GB,1)}},
+        @{n='剩余(GB)';e={[math]::Round($_.SizeRemaining/1GB,1)}}
+
+# 物理磁盘信息
+Get-Disk | Select-Object Number, FriendlyName, @{n='容量(GB)';e={$_.Size/1GB}}, PartitionStyle
+
+# 目录占用排行（当前目录下最大的10个文件夹）
+Get-ChildItem -Directory | ForEach-Object {
+    [PSCustomObject]@{ Name=$_.Name; SizeMB=[math]::Round((Get-ChildItem $_.FullName -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum/1MB,1) }
+} | Sort-Object SizeMB -Descending | Select-Object -First 10
+```
+
+---
+
+## 四、进程（Process）
+
+### 1. 查看全部进程
+
+```powershell
+Get-Process                 # 别名: ps
+Get-Process | Format-Table -AutoSize
+```
+
+### 2. 按内存占用排序 —— 占用最高的前 10 个进程
+
+```powershell
+Get-Process | Sort-Object WS -Descending | Select-Object -First 10 |
+    Select-Object Id, ProcessName,
+        @{n='内存(MB)';e={[math]::Round($_.WS/1MB,1)}}, CPU
+```
+
+> PowerShell 7 可简写为 `Sort-Object WS -Descending -Top 10`，但 Windows 自带的 5.1 不支持 `-Top`，上面这种写法两边通用。
+
+### 3. 按 CPU 时间排序
+
+```powershell
+Get-Process | Where-Object CPU -gt 0 | Sort-Object CPU -Descending |
+    Select-Object -First 10 Id, ProcessName, CPU
+```
+
+### 4. 查找指定进程（支持通配符）
+
+```powershell
+Get-Process -Name chrome            # 精确名称
+Get-Process -Name *python*          # 模糊匹配
+Get-Process -Id 12345               # 按 PID 查
+```
+
+### 5. 结束进程
+
+```powershell
+Stop-Process -Name notepad -Force        # 按名称结束
+Stop-Process -Id 12345 -Force            # 按 PID 结束
+```
+
+对应的外部命令（CMD 通用）：
+
+```cmd
+tasklist                      # 列出进程（/svc 可看服务关联）
+taskkill /PID 12345 /F        # 按 PID 强制结束
+taskkill /IM notepad.exe /F   # 按名称强制结束
+```
+
+### 6. 查看进程的命令行、路径等详细信息（含其他用户进程需管理员权限）
+
+```powershell
+Get-CimInstance Win32_Process |
+    Select-Object ProcessId, Name, ExecutablePath, CommandLine
+```
+
+---
+
+## 五、服务（可选补充）
+
+```powershell
+Get-Service                                 # 全部服务
+Get-Service -Name wuauserv                  # 指定服务（此处为 Windows 更新）
+Get-Service | Where-Object Status -eq 'Running'   # 只看正在运行的
+Restart-Service -Name wuauserv              # 重启服务（需管理员）
+```
+
+---
+
+## 六、网络相关（可选补充）
+
+```powershell
+ipconfig /all                               # 网络配置（CMD 通用）
+Get-NetIPAddress -AddressFamily IPv4        # 本机 IPv4 地址
+netstat -ano                                # 端口占用与对应 PID（CMD 通用）
+ping 8.8.8.8                                # 连通性测试
+Test-Connection -ComputerName www.github.com  # PowerShell 原生 ping
+```
+
+---
+
+## 七、常用技巧与注意事项
+
+1. **管理员权限**：右键 PowerShell 选「以管理员身份运行」。查看系统级进程、结束系统服务、安装软件等操作需要它。
+2. **执行策略报错**：第一次运行 `.ps1` 脚本若提示禁止运行，管理员执行：
+   ```powershell
+   Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+   ```
+3. **管道 `|`**：把上一个命令的输出传给下一个命令，如 `Get-Process | Sort-Object WS -Descending`，这是 PowerShell 最常用的组合方式。
+4. **别名**：`ps` = `Get-Process`，`gps` 同义；`kill` = `Stop-Process`。用 `Get-Alias` 查看全部别名。
+5. **看帮助**：`Get-Help Get-Process -Examples` 可查看任意命令的示例用法。
+6. **wmic 已弃用**：网上老教程的 `wmic cpu get name` 等命令在较新 Windows 上已移除，请统一改用本文的 `Get-CimInstance`。
+7. **PowerShell 版本**：用 `$PSVersionTable` 查看。Windows 自带的 5.1 已可用；`Get-ComputerInfo`、`Sort-Object -Top` 等在 PowerShell 7 中体验更好。
+
+
 # 护眼模式使用说明（Ubuntu GNOME / Wayland）
 
 > 本机环境：Ubuntu + GNOME 桌面 + Wayland 会话
