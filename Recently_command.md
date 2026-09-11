@@ -1,3 +1,27 @@
+
+# 1. 清理嵌套仓库
+git rm -f --cached DFT_TEST_TOOLS_web
+
+# 2. 清理已暂存的缓存
+git rm -r --cached __pycache__
+
+# 3. 首次提交
+git add .
+git commit -m "初始化 LB3 测试数据工具仓库"
+
+# 4. 配置远程
+git remote add origin https://github.com/3771365709-arch/DFT_TEST_TOOLS.git
+
+# 5. 首次推送
+git push -u origin main
+
+# 6. 提交 .gitignore 的后续改动（本次待办）
+git add .gitignore
+git commit -m "移除 .gitignore 中 DFT_TEST_TOOLS_web 条目"
+git push
+
+
+
 # PowerShell 查看 / 内存 / 磁盘 / 进程 命令速查
 
 > **⚠️ 本文所有命令均基于 Windows 系统下的 PowerShell 环境**（Windows 10/11、Windows Server 均适用）。
